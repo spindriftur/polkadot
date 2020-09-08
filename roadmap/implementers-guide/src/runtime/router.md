@@ -4,12 +4,17 @@ The Router module is responsible for all messaging mechanisms supported between 
 
 ## Storage
 
-Storage layout:
+General storage entries
 
 ```rust
 /// Paras that are to be cleaned up at the end of the session.
 /// The entries are sorted ascending by the para id.
 OutgoingParas: Vec<ParaId>;
+```
+
+### Upward Message Passing (UMP)
+
+```rust
 /// Dispatchable objects ready to be dispatched onto the relay chain. The messages are processed in FIFO order.
 /// This is subject to `max_upward_queue_count` and
 /// `watermark_queue_size` from `HostConfiguration`.
@@ -36,7 +41,7 @@ DownwardMessageQueues: map ParaId => Vec<InboundDownwardMessage>;
 ///
 /// Each link in this chain has a form:
 /// `(prev_head, B, H(M))`, where
-/// - `prev_head`: is the previous head hash.
+/// - `prev_head`: is the previous head hash or zero if none.
 /// - `B`: is the relay-chain block number in which a message was appended.
 /// - `H(M)`: is the hash of the message being appended.
 DownwardMessageQueueHeads: map ParaId => Option<Hash>;
