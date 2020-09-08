@@ -95,6 +95,16 @@ pub enum DownwardMessage<AccountId = crate::AccountId> {
 	XCMPMessage(sp_std::vec::Vec<u8>),
 }
 
+/// A wrapped version of `DownwardMessage`. The difference is that it has attached the block number when
+/// the message was sent.
+#[derive(codec::Encode, codec::Decode, Clone, sp_runtime::RuntimeDebug, PartialEq)]
+pub struct InboundDownwardMessage<AccountId = crate::AccountId, BlockNumber = crate::BlockNumber> {
+	/// The block number at which this messages was put into the downward message queue.
+	pub sent_at: BlockNumber,
+	/// The actual downward message to processes.
+	pub msg: DownwardMessage<AccountId>,
+}
+
 /// V1 primitives.
 pub mod v1 {
 	pub use super::*;
