@@ -25,6 +25,7 @@ use sp_std::prelude::*;
 use frame_support::{decl_error, decl_module, decl_storage, weights::Weight, traits::Get};
 use sp_runtime::traits::{BlakeTwo256, Hash as HashT, SaturatedConversion};
 use primitives::v1::{Id as ParaId, DownwardMessage, InboundDownwardMessage, Hash};
+use codec::Encode;
 
 pub trait Trait: frame_system::Trait + configuration::Trait {}
 
@@ -88,7 +89,18 @@ impl<T: Trait> Module<T> {
 	}
 
 	/// Enqueue a downward message to a specific recipient para.
-	pub fn queue_downward_message(para: ParaId, msg: DownwardMessage<T::AccountId>) {
+	///
+	/// When encoded, the message should not exceed the `config.critical_downward_message_size`.
+	/// Otherwise, the message won't be sent and `Err` will be returned.
+	pub fn queue_downward_message(
+		para: ParaId,
+		msg: DownwardMessage<T::AccountId>,
+	) -> Result<(), ()> {
+		let serialized_len = msg.encode().len() as u32;
+		if serialized_len > <configuration::Module<T>>::config().critical_downward_message_size {
+			return Err(());
+		}
+
 		let inbound = InboundDownwardMessage {
 			msg,
 			sent_at: <frame_system::Module<T>>::block_number(),
@@ -108,6 +120,8 @@ impl<T: Trait> Module<T> {
 		<Self as Store>::DownwardMessageQueues::mutate(para, |v| {
 			v.push(inbound);
 		});
+
+		Ok(())
 	}
 
 	/// Checks if the number of processed downward messages is valid, i.e.:
@@ -209,9 +223,9 @@ mod tests {
 			run_to_block(1, None);
 
 			// enqueue downward messages to A, B and C.
-			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![1, 2, 3]));
-			Router::queue_downward_message(b, DownwardMessage::Opaque(vec![4, 5, 6]));
-			Router::queue_downward_message(c, DownwardMessage::Opaque(vec![7, 8, 9]));
+			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![1, 2, 3])).unwrap();
+			Router::queue_downward_message(b, DownwardMessage::Opaque(vec![4, 5, 6])).unwrap();
+			Router::queue_downward_message(c, DownwardMessage::Opaque(vec![7, 8, 9])).unwrap();
 
 			Router::schedule_para_cleanup(a);
 
@@ -245,7 +259,7 @@ mod tests {
 			assert_eq!(Router::dmq_length(a), 0);
 			assert_eq!(Router::dmq_length(b), 0);
 
-			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![1, 2, 3]));
+			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![1, 2, 3])).unwrap();
 
 			assert_eq!(Router::dmq_length(a), 1);
 			assert_eq!(Router::dmq_length(b), 0);
@@ -262,9 +276,9 @@ mod tests {
 			// processed_downward_messages=0 is allowed when the DMQ is empty.
 			assert!(Router::check_processed_downward_messages(a, 0));
 
-			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![1, 2, 3]));
-			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![4, 5, 6]));
-			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![7, 8, 9]));
+			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![1, 2, 3])).unwrap();
+			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![4, 5, 6])).unwrap();
+			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![7, 8, 9])).unwrap();
 
 			// 0 doesn't pass if the DMQ has msgs.
 			assert!(!Router::check_processed_downward_messages(a, 0));
@@ -284,9 +298,9 @@ mod tests {
 		new_test_ext(default_genesis_config()).execute_with(|| {
 			assert_eq!(Router::dmq_length(a), 0);
 
-			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![1, 2, 3]));
-			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![4, 5, 6]));
-			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![7, 8, 9]));
+			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![1, 2, 3])).unwrap();
+			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![4, 5, 6])).unwrap();
+			Router::queue_downward_message(a, DownwardMessage::Opaque(vec![7, 8, 9])).unwrap();
 			assert_eq!(Router::dmq_length(a), 3);
 
 			// pruning 0 elements shouldn't change anything.
@@ -295,6 +309,27 @@ mod tests {
 
 			Router::prune_dmq(a, 2);
 			assert_eq!(Router::dmq_length(a), 1);
+		});
+	}
+
+	#[test]
+	fn queue_downward_message_critical() {
+		let a = ParaId::from(1312);
+
+		let mut genesis = default_genesis_config();
+		genesis.configuration.config.critical_downward_message_size = 7;
+
+		new_test_ext(genesis).execute_with(|| {
+			let smol = [0; 3].to_vec();
+			let big = [0; 8].to_vec();
+
+			// still within limits
+			assert_eq!(smol.encode().len(), 4);
+			assert!(Router::queue_downward_message(a, DownwardMessage::Opaque(smol)).is_ok());
+
+			// that's too big
+			assert_eq!(big.encode().len(), 9);
+			assert!(Router::queue_downward_message(a, DownwardMessage::Opaque(big)).is_err());
 		});
 	}
 }
